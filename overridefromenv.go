@@ -1,4 +1,4 @@
-// Copyright 2019 Carleton University Library
+// Copyright 2026 Carleton University Library
 // All rights reserved.
 // Use of this source code is governed by the MIT
 // license that can be found in the LICENSE file.
@@ -14,43 +14,58 @@ import (
 )
 
 // Override sets unset flags using environment variables.
-// It finds unset flags in fs, then sets those flags using the value of the
-// environment variable with the key strings.ToUpper(prefix+flag.Name).
+// It finds unset flags in fs, then sets those flags using the value of an
+// environment variable.
+// To help group environment variables used by an application, an optional
+// prefix can be provided. Prefixes that do not end in a '_' character have
+// a '_' character appended.
+// The name of the environment variable to lookup is the name of the unset
+// flag, with the optional prefix prepended, converted to uppercase, and
+// with any '-' characters replaced with '_' characters.
 func Override(fs *flag.FlagSet, prefix string) error {
+	// Add a trailing '_' character to the prefix if it is needed.
+	if prefix != "" && !strings.HasSuffix(prefix, "_") {
+		prefix += "_"
+	}
 
-	// A map of pointers to unset flags.
-	listOfUnsetFlags := make(map[*flag.Flag]bool)
+	// The set of unset flag names.
+	unset := make(map[string]struct{})
 
 	// Visit calls a function on "only those flags that have been set."
 	// VisitAll calls a function on "all flags, even those not set."
 	// No way to ask for "only unset flags". So, we add all, then
 	// delete the set flags.
 
-	// First, visit all the flags, and add them to our map.
-	fs.VisitAll(func(f *flag.Flag) { listOfUnsetFlags[f] = true })
+	// First, visit all the flags, and add them to the set.
+	fs.VisitAll(func(f *flag.Flag) { unset[f.Name] = struct{}{} })
 
 	// Then delete the set flags.
-	fs.Visit(func(f *flag.Flag) { delete(listOfUnsetFlags, f) })
+	fs.Visit(func(f *flag.Flag) { delete(unset, f.Name) })
 
-	// Loop through our list of unset flags.
-	// We don't care about the values in our map, only the keys.
-	for f := range listOfUnsetFlags {
+	for name := range unset {
 		// Build the corresponding environment variable name for each flag.
-		envVarName := fmt.Sprintf("%v%v", strings.ToUpper(prefix), strings.ToUpper(f.Name))
+		key := prefix + name
+		key = strings.ReplaceAll(key, "-", "_")
+		key = strings.ToUpper(key)
 
-		// Look for the environment variable name.
-		// If found, set the flag to that value.
-		// If there's a problem setting the flag value,
-		// there's a serious problem we can't recover from.
-		envVarValue, found := os.LookupEnv(envVarName)
+		// Look for the environment variable.
+		// If found, set the flag to that variable's value.
+		// If there's a problem setting the value, return an error.
+		value, found := os.LookupEnv(key)
 		if found {
-			err := f.Value.Set(envVarValue)
+			err := fs.Set(name, value)
 			if err != nil {
-				return fmt.Errorf("unable to set flag %v from environment variable %v, "+
-					"which has a value of \"%v\": %w",
-					f.Name, envVarName, envVarValue, err)
+				return fmt.Errorf("unable to set flag %q from environment variable %q: %w",
+					name, key, err)
 			}
 		}
 	}
 	return nil
+
+}
+
+// Override the flag package's default set of command-line flags.
+// flag.Parse() should be called first.
+func OverrideCommandLine(prefix string) error {
+	return Override(flag.CommandLine, prefix)
 }

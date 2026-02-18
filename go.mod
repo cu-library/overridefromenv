@@ -1,3 +1,3 @@
-module github.com/cu-library/overridefromenv
+module github.com/cu-library/overridefromenv/v2
 
-go 1.13
+go 1.17
